@@ -2,8 +2,9 @@
 
 const
     EventEmitter = require('events'),
+    BeamMiningClient = require('@mintpond/mint-beam').BeamMiningClient,
     precon = require('@mintpond/mint-precon'),
-    RpcClient = require('./class.RpcClient'),
+    mu = require('@mintpond/mint-utils'),
     Server = require('./class.Server'),
     Client = require('./class.Client'),
     Share = require('./class.Share'),
@@ -22,12 +23,12 @@ class Stratum extends EventEmitter {
         super();
 
         const _ = this;
-        _._config = config;
+        _._config = mu.inlineAllFiles(config);
 
         _._isInit = false;
         _._server = null;
         _._jobManager = null;
-        _._rpcClient = null;
+        _._beamClient = null;
     }
 
 
@@ -117,10 +118,10 @@ class Stratum extends EventEmitter {
     get jobManager() { return this._jobManager; }
 
     /**
-     * Get the coin daemon RPC client.
-     * @returns {null|RpcClient}
+     * Get the Beam stratum client.
+     * @returns {null|BeamMiningClient}
      */
-    get rpcClient() { return this._rpcClient; }
+    get beamClient() { return this._beamClient; }
 
     /**
      * Get the stratum configuration.
@@ -137,9 +138,9 @@ class Stratum extends EventEmitter {
 
         const _ = this;
 
+        _._beamClient = _._createBeamClient();
         _._server = _._createServer();
         _._jobManager = _._createJobManager();
-        _._rpcClient = _._createRpcClient();
 
         _._server.on(Server.EVENT_CLIENT_CONNECT, _._reEmit(Stratum.EVENT_CLIENT_CONNECT));
         _._server.on(Server.EVENT_CLIENT_DISCONNECT, _._reEmit(Stratum.EVENT_CLIENT_DISCONNECT));
@@ -151,14 +152,20 @@ class Stratum extends EventEmitter {
         _._server.on(Server.EVENT_CLIENT_UNKNOWN_STRATUM_METHOD, _._reEmit(Stratum.EVENT_CLIENT_UNKNOWN_STRATUM_METHOD));
 
         // load first job
-        _._jobManager.init((err) => {
+        _._beamClient.connect((err) => {
 
             if (err)
-                throw new Error(`Failed to start stratum server. Failed to get first job: ${err}`);
+                throw new Error(`Failed to connect to beam stratum: ${JSON.stringify(err)}`);
 
-            _._server.start(() => {
-                _._jobManager.on(JobManager.EVENT_NEXT_JOB, _._onNextJob.bind(_));
-                callback && callback();
+            _._jobManager.init((err) => {
+
+                if (err)
+                    throw new Error(`Failed to start stratum server. Failed to get first job: ${JSON.stringify(err)}`);
+
+                _._server.start(() => {
+                    _._jobManager.on(JobManager.EVENT_NEXT_JOB, _._onNextJob.bind(_));
+                    callback && callback();
+                });
             });
         });
 
@@ -221,23 +228,14 @@ class Stratum extends EventEmitter {
             _._submitBlock(share, (err, result) => {
 
                 if (err || !result.isAccepted) {
-                    _._emitShare(share);
-                    return;
+                    share.isValidBlock = false
+                    share.blockId = null;
+                }
+                else {
+                    share.blockId = result.blockHash;
                 }
 
-                _.jobManager.updateJob(() => {
-                    _._checkBlockAccepted(share, (err, result) => {
-
-                        if (err || !result.isAccepted) {
-                            share.isValidBlock = false
-                        }
-                        else {
-                            share.blockTxId = result.block.txId;
-                        }
-
-                        _._emitShare(share);
-                    });
-                });
+                _._emitShare(share);
             });
         }
         else {
@@ -258,14 +256,14 @@ class Stratum extends EventEmitter {
     }
 
 
-    _createRpcClient() {
+    _createBeamClient() {
         const _ = this;
-        const rpc = _._config.rpc;
-        return new RpcClient({
-            host: rpc.host,
-            port: rpc.port,
-            user: rpc.user,
-            password: rpc.password
+        const beam = _._config.beam;
+        return new BeamMiningClient({
+            host: beam.host,
+            port: beam.port,
+            apiKey: beam.apiKey,
+            isSecure: beam.useTLS
         });
     }
 
@@ -273,41 +271,18 @@ class Stratum extends EventEmitter {
     _submitBlock(share, callback) {
 
         const _ = this;
-        _._rpcClient.cmd({
-            method: 'submitblock',
-            params: [share.blockHex],
+        _._beamClient.submitSolution({
+            beamJobId: share.beamJobId,
+            nonceHex: share.nonceHex,
+            outputHex: share.outputHex,
             callback: (err, result) => {
                 if (err) {
-                    console.error(`Error while submitting block to daemon: ${err}`);
+                    console.error(`Error while submitting block to Beam node: ${JSON.stringify(err)}`);
                 }
                 else if (!result.isAccepted) {
-                    console.error(`Daemon rejected a supposedly valid block: ${result}`)
+                    console.error(`Beam node rejected a supposedly valid block: ${JSON.stringify(result)}`)
                 }
                 callback(err, result);
-            }
-        });
-    }
-
-
-    _checkBlockAccepted(share, callback) {
-
-        const _ = this;
-        _._rpcClient.cmd({
-            method: 'getblock',
-            params: [share.blockId],
-            callback: (err, block) => {
-                if (err) {
-                    console.error(`Failed to verify block submission: ${err}`);
-                    callback(err, {
-                        isAccepted: false
-                    });
-                }
-                else {
-                    callback(null, {
-                        isAccepted: true,
-                        block: block
-                    });
-                }
             }
         });
     }

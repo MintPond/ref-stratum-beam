@@ -4,9 +4,9 @@ const
     EventEmitter = require('events'),
     precon = require('@mintpond/mint-precon'),
     mu = require('@mintpond/mint-utils'),
+    TcpSocket = require('@mintpond/mint-socket').TcpSocket,
     ClientWriter = require('./class.ClientWriter'),
     ClientReader = require('./class.ClientReader'),
-    Socket = require('./class.Socket'),
     Job = require('./class.Job');
 
 const TIMEOUT = 600;
@@ -22,14 +22,14 @@ class Client extends EventEmitter {
      * @param args.subscriptionIdHex {string}
      * @param args.extraNonce1Hex {string}
      * @param args.stratum {Stratum}
-     * @param args.socket {Socket}
+     * @param args.socket {TcpSocket}
      * @param args.port {{number:number, diff:number}}
      */
     constructor(args) {
         precon.string(args.subscriptionIdHex, 'subscriptionIdHex');
         precon.string(args.extraNonce1Hex, 'extraNonce1Hex');
         precon.notNull(args.stratum, 'stratum');
-        precon.instanceOf(args.socket, Socket, 'socket');
+        precon.instanceOf(args.socket, TcpSocket, 'socket');
         precon.notNull(args.port, 'port');
 
         super();
@@ -59,10 +59,10 @@ class Client extends EventEmitter {
         _._disconnectReason = '';
 
 
-        _._socket.on(Socket.EVENT_MESSAGE_IN, _._onSocketMessageIn.bind(_));
-        _._socket.on(Socket.EVENT_MALFORMED_MESSAGE, _._onMalformedMessage.bind(_));
-        _._socket.on(Socket.EVENT_DISCONNECT, _._onDisconnect.bind(_));
-        _._socket.on(Socket.EVENT_ERROR, _._onSocketError.bind(_));
+        _._socket.on(TcpSocket.EVENT_MESSAGE_IN, _._onSocketMessageIn.bind(_));
+        _._socket.on(TcpSocket.EVENT_MALFORMED_MESSAGE, _._onMalformedMessage.bind(_));
+        _._socket.on(TcpSocket.EVENT_DISCONNECT, _._onDisconnect.bind(_));
+        _._socket.on(TcpSocket.EVENT_ERROR, _._onSocketError.bind(_));
     }
 
 
@@ -245,6 +245,11 @@ class Client extends EventEmitter {
      */
     get disconnectReason() { return this._disconnectReason; }
 
+    /**
+     * @returns {Stratum}
+     */
+    get stratum() { return this._stratum; }
+
 
     /**
      * Set the clients mining job. If the job is for a new block it will be sent immediately. If not it will be added
@@ -274,7 +279,7 @@ class Client extends EventEmitter {
         _._prevJob = isNewBlock ? null : _._currentJob;
         _._currentJob = job;
 
-        _._writer.miningNotify({
+        _._writer.job({
             job: job,
             diff: _.diff,
             cleanJobs: isNewBlock

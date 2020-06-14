@@ -18,28 +18,23 @@ class Share {
      * @param args.client {Client}
      * @param args.stratum {Stratum}
      * @param args.workerName {string}
-     * @param args.jobIdHex {string}
-     * @param args.extraNonce2Hex {string}
-     * @param args.nTimeHex {string}
+     * @param args.jobId {string}
      * @param args.nonceHex {string}
+     * @param args.outputHex {string}
      */
     constructor(args) {
         precon.notNull(args.client, 'client');
         precon.notNull(args.stratum, 'stratum');
-        precon.string(args.workerName, 'workerName');
-        precon.string(args.jobIdHex, 'jobIdHex');
-        precon.string(args.extraNonce2Hex, 'extraNonce2Hex');
-        precon.string(args.nTimeHex, 'nTimeHex');
+        precon.string(args.jobId, 'jobId');
         precon.string(args.nonceHex, 'nonceHex');
+        precon.string(args.outputHex, 'outputHex');
 
         const _ = this;
         _._client = args.client;
         _._stratum = args.stratum;
-        _._workerName = args.workerName;
-        _._jobIdHex = args.jobIdHex;
-        _._extraNonce2Hex = args.extraNonce2Hex;
-        _._nTimeHex = args.nTimeHex;
+        _._jobId = args.jobId;
         _._nonceHex = args.nonceHex;
+        _._outputHex = args.outputHex;
 
         _._stratumDiff = _._client.diff;
         _._shareDiff = 0;
@@ -52,10 +47,6 @@ class Share {
         _._isBlockAccepted = false;
         _._error = null;
         _._blockId = null;
-        _._blockHex = null;
-        _._blockTxId = null;
-
-        _._minerAddress = _._workerName.split('.');
     }
 
     /**
@@ -68,7 +59,14 @@ class Share {
      * Get the job ID of the share.
      * @returns {string}
      */
-    get jobIdHex() { return this._jobIdHex; }
+    get jobId() { return this._jobId; }
+
+    /**
+     * Get the Beam stratum job Id.
+     * This value is not available until a job has been associated with the share via the #validate function.
+     * @returns {string}
+     */
+    get beamJobId() { return this._job ? this._job.beamJobId : ''; }
 
     /**
      * Get the job height of the share.
@@ -93,7 +91,7 @@ class Share {
      * Get the mining address of the client that submitted the share.
      * @returns {string}
      */
-    get minerAddress() { return this._client.worker.minerAddress; }
+    get minerAddress() { return this._client.minerAddress; }
 
     /**
      * Get the share difficulty.
@@ -135,7 +133,7 @@ class Share {
 
     /**
      * Determine if the share as a block was accepted by the coin daemon.
-     * This value is not available until the block transaction id is set via the #blockTxId property.
+     * This value is not available until the block ID is set via the #blockId property.
      * @returns {boolean}
      */
     get isBlockAccepted() { return this._isBlockAccepted; }
@@ -148,38 +146,16 @@ class Share {
     get error() { return this._error; }
 
     /**
-     * Get the block hex data to submit to the coin daemon.
-     * This value is not available until it is calculated in the #validate function and only when the share is a valid
-     * block.
-     * @returns {null|string}
-     */
-    get blockHex() { return this._blockHex; }
-
-    /**
      * Get the block ID of the valid block.
-     * This value is not available until it is calculated in the #validate function and only when the share is a valid
-     * block.
-     * @returns {null|string}
-     */
-    get blockId() { return this._blockId; }
-
-    /**
-     * Get the block coinbase transaction ID.
      * This value is only available when it is externally set.
      * @returns {null|string}
      */
-    get blockTxId() { return this._blockTxId; }
-    set blockTxId(txId) {
-        precon.opt_string(txId, 'blockTxId');
-        this._blockTxId = txId;
-        this._isBlockAccepted = !!txId;
+    get blockId() { return this._blockId; }
+    set blockId(id) {
+        precon.opt_string(id, 'blockId');
+        this._blockId = id;
+        this._isBlockAccepted = !!id;
     }
-
-    /**
-     * Get share nTime as a Buffer
-     * @returns {Buffer}
-     */
-    get nTimeHex() { return this._nTimeHex; }
 
     /**
      * Get share nonce as a Buffer
@@ -188,16 +164,10 @@ class Share {
     get nonceHex() { return this._nonceHex; }
 
     /**
-     * Get client extraNonce1 as a Buffer
-     * @returns {Buffer}
-     */
-    get extraNonce1Hex() { return this._client.extraNonce1Hex; }
-
-    /**
      * Get share extraNonce2 as a Buffer
      * @returns {Buffer}
      */
-    get extraNonce2Hex() { return this._extraNonce2Hex; }
+    get outputHex() { return this._outputHex; }
 
 
     /**
@@ -211,11 +181,7 @@ class Share {
         if (mu.isBoolean(_._isValidShare))
             return _._isValidShare;
 
-        // check worker name mismatch
-        if (_._workerName !== _._client.workerName)
-            return _._setError(StratumError.UNAUTHORIZED_WORKER);
-
-        _._job = _._stratum.jobManager.validJobsOMap[_._jobIdHex];
+        _._job = _._stratum.jobManager.validJobsOMap[_._jobId];
 
         // check valid job
         if (!_._job)
@@ -225,56 +191,50 @@ class Share {
         if (_._isInvalidNonceSize())
             return false;
 
-        // check extraNonce2 size
-        if (_._isInvalidExtraNonce2Size())
-            return false;
-
-        // check time size
-        if (_._isInvalidTimeSize())
-            return false;
-
-        // check time range
-        if (_._isInvalidTimeRange())
+        // check output size
+        if (_._isInvalidSolutionSize())
             return false;
 
         // check duplicate share
         if (_._isDuplicateShare())
             return false;
 
-        // check valid block
-        const header = _._validateBlock();
+        const inputBuf = Buffer.from(_._job.inputHex, 'hex');
+        const outputBuf = Buffer.from(_._outputHex, 'hex');
+        const nonceBuf = Buffer.from(_._nonceHex, 'hex');
 
-        if (_._isValidBlock) {
-
-            _._blockHex = _._serializeBlock(header).toString('hex');
-            _._blockId = header.hash;
-
-            console.log(`Winning nonce submitted: ${_._blockId}`);
+        const isValid = algorithm.verify(inputBuf, nonceBuf, outputBuf);
+        if (!isValid) {
+            _._setError(StratumError.INVALID_SOLUTION);
+            return false;
         }
 
+        // check valid block
+        _._validateBlock(outputBuf);
+
+        if (_._isValidBlock)
+            console.log(`Winning nonce submitted: ${_._nonceHex}`);
+
         // check low difficulty
-        if (!_._error && _._isLowDifficulty())
+        if (_._isLowDifficulty())
             return false;
 
         // calculate expected blocks
-        if (_._isValidShare !== false)
-            _._expectedBlocks = _._calculateExpectedBlocks();
+        _._expectedBlocks = _._calculateExpectedBlocks();
 
-        return mu.isBoolean(_._isValidShare)
-            ? _._isValidShare
-            : (_._isValidShare = true);
+        return _._isValidShare = true;
     }
 
 
     toJSON() {
         const _ = this;
         return {
-            jobId: _.jobIdHex,
+            jobId: _.jobId,
             jobHeight: _.jobHeight,
             submitTime: _.submitTime,
             subscriptionIdHex: _.subscriptionIdHex,
             minerAddress: _.minerAddress,
-            workerName: _._workerName,
+            workerName: _._client.workerName,
             shareDiff: _.shareDiff,
             stratumDiff: _.stratumDiff,
             expectedBlocks: _.expectedBlocks,
@@ -282,9 +242,7 @@ class Share {
             isValidShare: _.isValidShare,
             isBlockAccepted: _.isBlockAccepted,
             error: _.error,
-            blockHex: _.blockHex,
-            blockId: _.blockId,
-            blockTxId: _.blockTxId
+            blockId: _.blockId
         };
     }
 
@@ -297,7 +255,7 @@ class Share {
 
     _isInvalidNonceSize() {
         const _ = this;
-        if (_._nonceHex.length !== 4) {
+        if (_._nonceHex.length !== 16) {
             _._setError(StratumError.INCORRECT_NONCE_SIZE);
             return true;
         }
@@ -305,31 +263,10 @@ class Share {
     }
 
 
-    _isInvalidExtraNonce2Size() {
+    _isInvalidSolutionSize() {
         const _ = this;
-        if (_._extraNonce2Hex.length !== 4) {
-            _._setError(StratumError.INCORRECT_EXTRANONCE2_SIZE);
-            return true;
-        }
-        return false;
-    }
-
-
-    _isInvalidTimeSize() {
-        const _ = this;
-        if (_._nTimeHex.length !== 4) {
-            _._setError(StratumError.INCORRECT_TIME_SIZE);
-            return true;
-        }
-        return false;
-    }
-
-
-    _isInvalidTimeRange() {
-        const _ = this;
-        const nTimeInt = _._nTimeHex.readUInt32LE(0);
-        if (nTimeInt < _._job.blockTemplate.curtime || nTimeInt > _._submitTime + 7200) {
-            _._setError(StratumError.TIME_OUT_OF_RANGE);
+        if (_._outputHex.length !== 208) {
+            _._setError(StratumError.INCORRECT_SOLUTION_SIZE);
             return true;
         }
         return false;
@@ -366,70 +303,14 @@ class Share {
     }
 
 
-    _validateBlock() {
+    _validateBlock(outputBuf) {
         const _ = this;
 
-        const header = _._serializeHeader();
-        const headerBi = bi.fromBufferLE(header.hash);
+        const outputHashBuf = buffers.sha256(outputBuf);
+        const headerBi = bi.fromBufferBE(outputHashBuf);
+
         _._shareDiff = algorithm.diff1 / Number(headerBi) * algorithm.multiplier;
-        _._isValidBlock = _._job.targetBi >= headerBi;
-
-        return header;
-    }
-
-
-    _serializeHeader() {
-        const _ = this;
-
-        const coinbaseBuf = _._job.coinbase.serialize(_);
-        const coinbaseHashBuf = buffers.sha256d(coinbaseBuf);
-
-        const merkleRootBuf = _._job.merkleTree.withFirstHash(coinbaseHashBuf);
-
-        const headerBuf = Buffer.alloc(80);
-        let position = 0;
-
-        /* version    */
-        buffers.hexToLE(_._job.versionHex).copy(headerBuf, position);
-        position += 4;
-
-        /* prev block */
-        buffers.hexToLE(_._job.prevHashHex).copy(headerBuf, position);
-        position += 32;
-
-        /* merkle     */
-        merkleRootBuf.copy(headerBuf, position);
-        position += 32;
-
-        /* time       */
-        buffers.hexToLE(_._nTimeHex).copy(headerBuf, position);
-        position += 4;
-
-        /* bits       */
-        buffers.hexToLE(_._job.bitsHex).copy(headerBuf, position);
-        position += 4;
-
-        /* nonce      */
-        buffers.hexToLE(_._nonceHex).copy(headerBuf, position);
-        //position += 4;
-
-        return {
-            hash: algorithm.hash(headerBuf),
-            buffer: headerBuf,
-            coinbaseBuf: coinbaseBuf
-        };
-    }
-
-
-    _serializeBlock(header) {
-        const _ = this;
-
-        return Buffer.concat([
-            /* header           */ header.buffer,
-            /* transaction len  */ buffers.packVarInt(_._job.blockTemplate.transactions.length + 1/* +coinbase */),
-            /* coinbase tx      */ header.coinbaseBuf,
-            /* transactions     */ _._job.txDataBuf
-        ]);
+        _._isValidBlock = _._shareDiff >= _._job.pDiff;
     }
 }
 

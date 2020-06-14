@@ -1,13 +1,15 @@
 'use strict';
 
 const StratumErrorCode = {
-    get OTHER() { return 20 },
-    get STALE() { return 21 },
-    get DUPLICATE() { return 22 },
-    get LOW_DIFFICULTY() { return 23 },
-    get UNAUTHORIZED_WORKER() { return 24 },
-    get NOT_SUBSCRIBED() { return 25 }
-};
+    get OTHER() { return -32003 },
+    get INVALID_SOLUTION() { return -32004 },
+    get SOLUTION_SIZE() { return -32005 },
+    get DUPLICATE() { return -32006 },
+    get NONCE_SIZE() { return -32007 },
+    get STALE() { return -32008 },
+    get LOW_DIFFICULTY() { return -32009 },
+    get UNAUTHORIZED_WORKER() { return -32010 }
+}
 
 module.exports = StratumErrorCode;
 
@@ -15,11 +17,13 @@ Object.defineProperties(StratumErrorCode, {
     all: {
         value: [
             StratumErrorCode.OTHER,
-            StratumErrorCode.STALE,
+            StratumErrorCode.INVALID_SOLUTION,
+            StratumErrorCode.SOLUTION_SIZE,
             StratumErrorCode.DUPLICATE,
+            StratumErrorCode.NONCE_SIZE,
+            StratumErrorCode.STALE,
             StratumErrorCode.LOW_DIFFICULTY,
-            StratumErrorCode.UNAUTHORIZED_WORKER,
-            StratumErrorCode.NOT_SUBSCRIBED
+            StratumErrorCode.UNAUTHORIZED_WORKER
         ],
         enumerable: false
     }

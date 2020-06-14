@@ -4,6 +4,7 @@ const
     EventEmitter = require('events'),
     precon = require('@mintpond/mint-precon'),
     Counter = require('@mintpond/mint-utils').Counter,
+    BeamMiningClient = require('@mintpond/mint-beam').BeamMiningClient,
     Job = require('./class.Job');
 
 
@@ -57,11 +58,15 @@ class JobManager extends EventEmitter {
      */
     init(callback) {
         const _ = this;
-        _.updateJob(() => {
-            _._scheduleJobUpdate();
-            _._scheduleBlockPolling();
-            callback && callback();
+
+        if (_._stratum.beamClient.currentJob)
+            _._processBeamJob(_._stratum.beamClient.currentJob);
+
+        _._stratum.beamClient.on(BeamMiningClient.EVENT_JOB, beamJob => {
+            _._processBeamJob(beamJob);
         });
+
+        callback && callback();
     }
 
 
@@ -75,86 +80,28 @@ class JobManager extends EventEmitter {
     }
 
 
-    /**
-     * Notify the job manager of a new block on the network.
-     */
-    blockNotify() {
-
-        const _ = this;
-
-        _._getBlockTemplate((err, blockTemplate) => {
-            if (err) {
-                console.error(`Failed to get block template for new block: ${err}`);
-            }
-            else if (blockTemplate) {
-                _._processTemplate(blockTemplate);
-            }
-        });
-    }
-
-
-    /**
-     * Update miners with a new job containing latest transactions.
-     *
-     * @param [callback] {function(err:*,currentJob:Job)}
-     */
-    updateJob(callback) {
-        precon.opt_funct(callback, 'callback');
-
-        const _ = this;
-        _._getBlockTemplate((err, blockTemplate) => {
-            if (err) {
-                console.error(`Failed to get block template for job update: ${err}`);
-                callback && callback(err, _.currentJob);
-            }
-            else {
-                _._processTemplate(blockTemplate, () => {
-                    callback && callback(err, _.currentJob);
-                });
-            }
-        });
-    }
-
-
-    _getBlockTemplate(callback) {
-        const _ = this;
-        _._stratum.rpcClient.cmd({
-            method: 'getblocktemplate',
-            params: [{
-                capabilities: [
-                    'coinbasetxn',
-                    'workid',
-                    'coinbase/append'
-                ],
-                rules: ['segwit']
-            }],
-            callback: callback
-        });
-    }
-
-
-    _processTemplate(blockTemplate, callback) {
+    _processBeamJob(beamJob, callback) {
 
         const _ = this;
         const currentJob = _.currentJob;
-        const isNewBlock = !currentJob || currentJob.prevBlockId !== blockTemplate.previousblockhash;
+        const isNewBlock = !currentJob || currentJob.height !== beamJob.height;
 
-        if (currentJob && blockTemplate.height < currentJob.height) {
+        if (currentJob && beamJob.height < currentJob.height) {
             callback && callback();
             return;
         }
 
-        _._nextJob(blockTemplate, isNewBlock);
+        _._nextJob(beamJob, isNewBlock);
 
         callback && callback();
     }
 
 
-    _nextJob(blockTemplate, isNew) {
+    _nextJob(beamJob, isNew) {
 
         const _ = this;
 
-        const job = _._createJob(_._jobCounter.nextHex32().toLowerCase(), blockTemplate);
+        const job = _._createJob(_._jobCounter.next().toString(), beamJob);
 
         _._currentJob = job;
 
@@ -163,54 +110,16 @@ class JobManager extends EventEmitter {
 
         _._validJobsOMap[job.idHex] = job;
 
-        _._scheduleJobUpdate();
-
         _.emit(JobManager.EVENT_NEXT_JOB, { job: job, isNewBlock: isNew });
     }
 
 
-    _createJob(idHex, blockTemplate) {
+    _createJob(idHex, beamJob) {
         const _ = this;
         return new Job({
             idHex: idHex,
-            blockTemplate: blockTemplate,
+            beamJob: beamJob,
             stratum: _._stratum
-        });
-    }
-
-
-    _scheduleJobUpdate() {
-        const _ = this;
-        clearInterval(_._jobInterval);
-        _._jobInterval = setInterval(() => {
-
-            _.updateJob();
-
-        }, (_._stratum.config.jobUpdateInterval || 55) * 1000);
-    }
-
-    _scheduleBlockPolling() {
-        const _ = this;
-        const blockPollIntervalMs = _._stratum.config.blockPollIntervalMs;
-
-        if (!blockPollIntervalMs)
-            return;
-
-        clearInterval(_._blockInterval);
-        _._blockInterval = setInterval(_._pollBlockTemplate.bind(_), blockPollIntervalMs);
-    }
-
-
-    _pollBlockTemplate() {
-        const _ = this;
-        _._getBlockTemplate((err, blockTemplate) => {
-
-            if (!blockTemplate)
-                return;
-
-            const isNewBlock = !_.currentJob || _.currentJob.prevBlockId !== blockTemplate.previousblockhash;
-            if (isNewBlock)
-                _._processTemplate(blockTemplate);
         });
     }
 }

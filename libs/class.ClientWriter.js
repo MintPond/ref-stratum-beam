@@ -1,10 +1,11 @@
 'use strict';
 
 const
+    beamDiff = require('@mintpond/mint-beam').beamDiff,
     precon = require('@mintpond/mint-precon'),
-    mu = require('@mintpond/mint-utils'),
-    Job = require('./class.Job'),
-    StratumError = require('./class.StratumError');
+    Share = require('./class.Share'),
+    StratumError = require('./class.StratumError'),
+    algorithm = require('./service.algorithm');
 
 
 class ClientWriter {
@@ -25,83 +26,103 @@ class ClientWriter {
     }
 
 
-    reply(args) {
-        precon.integer(args.replyId, 'replyId');
-        precon.opt_boolean(args.result, 'result');
-        precon.opt_instanceOf(args.error, StratumError, 'error');
+    replyLoginFail(args) {
+        precon.string(args.replyId, 'replyId');
+        precon.opt_string(args.failReason, 'failReason');
 
         const _ = this;
-
         const replyId = args.replyId;
-        const result = args.result;
+        const failReason = args.failReason;
+
+        _._socket.send({
+            id: replyId,
+            method: 'result',
+            code: -32003,
+            description: failReason ? `Login failed: ${failReason}` : 'Login failed.',
+            jsonrpc: '2.0'
+        });
+    }
+
+
+    replyLoginSuccess(args) {
+        precon.string(args.replyId, 'replyId');
+        precon.string(args.noncePrefix, 'noncePrefix');
+
+        const _ = this;
+        const replyId = args.replyId;
+        const noncePrefix = args.noncePrefix;
+
+        _._socket.send({
+            id: replyId,
+            method: 'result',
+            code: 0,
+            description: 'Login success.',
+            nonceprefix: noncePrefix,
+            jsonrpc: '2.0',
+            ..._._client.stratum.beamClient.forkHeightOMap
+        });
+    }
+
+
+    replyError(args) {
+        precon.string(args.replyId, 'replyId');
+        precon.instanceOf(args.error, StratumError, 'error');
+
+        const _ = this;
+        const replyId = args.replyId;
         const error = args.error;
 
         _._socket.send({
             id: replyId,
-            result: error ? false: result,
-            error: error ? error.responseArr: null
+            method: 'result',
+            code: error.code,
+            description: error.message,
+            jsonrpc: '2.0'
         });
     }
 
 
-    replySubscribe(args) {
-        precon.integer(args.replyId, 'replyId');
+    replyShare(args) {
+        precon.string(args.replyId, 'replyId');
+        precon.instanceOf(args.share, Share, 'share');
 
         const _ = this;
-
         const replyId = args.replyId;
-        const subscriptionIdHex = _._client.subscriptionIdHex;
-        const extraNonce1Hex = _._client.extraNonce1Hex;
-        const extraNonce2Size = _._client.extraNonce2Size;
+        const share = args.share;
 
-        _._socket.send({
-            id: replyId,
-            result: [
-                [
-                    ['mining.set_difficulty', subscriptionIdHex],
-                    ['mining.notify', subscriptionIdHex]
-                ],
-                extraNonce1Hex,
-                extraNonce2Size
-            ],
-            error: null
-        });
-    }
-
-
-    miningNotify(args) {
-        precon.instanceOf(args.job, Job, 'job');
-        precon.boolean(args.cleanJobs, 'cleanJobs');
-        precon.opt_positiveNumber(args.diff, 'diff');
-
-        const _ = this;
-
-        const job = args.job;
-        const cleanJobs = args.cleanJobs;
-        const diff = args.diff;
-
-        if (mu.isNumber(diff)) {
+        if (share.isValidShare) {
             _._socket.send({
-                id: null,
-                method: 'mining.set_difficulty',
-                params: [diff]
+                id: replyId,
+                method: 'result',
+                code: 1,
+                description: 'accepted',
+                jsonrpc: '2.0'
             });
         }
+        else {
+            _._socket.send({
+                id: replyId,
+                method: 'result',
+                code: share.error.code,
+                description: share.error.message,
+                jsonrpc: '2.0'
+            });
+        }
+    }
+
+
+    job(args) {
+        const _ = this;
+        const job = args.job;
+        const diff = args.diff;
 
         _._socket.send({
-            id: null,
-            method: 'mining.notify',
-            params: [
-                /* 0 Job Id        */ job.idHex,
-                /* 1 prevhash      */ job.prevBlockId,
-                /* 2 coinb1        */ job.coinbase.coinbase1Buf.toString('hex'),
-                /* 3 coinb2        */ job.coinbase.coinbase2Buf.toString('hex'),
-                /* 4 merkle_branch */ job.merkleTree.branchHexArr,
-                /* 5 version       */ job.versionHex,
-                /* 6 nbits (diff)  */ job.bitsHex,
-                /* 7 ntime         */ job.curTimeHex,
-                /* 8 clean_jobs    */ cleanJobs
-            ]
+            id: job.idHex,
+            method: 'job',
+            height: job.height,
+            difficulty: beamDiff.pack(diff * algorithm.multiplier),
+            input: job.inputHex,
+            jsonrpc: '2.0'
         });
     }
 }

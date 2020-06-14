@@ -1,11 +1,12 @@
 'use strict';
 
-const buffers = require('@mintpond/mint-utils').buffers;
+const beamhash = require('@mintpond/hasher-beamhash');
 
 module.exports = {
-    diff1: 0x00000000ffff0000000000000000000000000000000000000000000000000000,
-    multiplier: Math.pow(2, 8),
-    hash: inputBuf => {
-        return buffers.sha256d(inputBuf);
+    name: 'BeamHashIII',
+    diff1: 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff,
+    multiplier: 1,
+    verify: (inputBuf, nonceBuf, outputBuf) => {
+        return beamhash.verify3(inputBuf, nonceBuf, outputBuf);
     }
 };

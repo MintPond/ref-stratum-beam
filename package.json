@@ -1,23 +1,24 @@
 {
-  "name": "@mintpond/ref-stratum",
+  "name": "@mintpond/ref-stratum-beam",
   "version": "0.1.0",
-  "description": "Generic reference stratum for testing, experimentation, and demonstration.",
+  "description": "Beam reference stratum for testing, experimentation, and demonstration.",
   "main": "index.js",
   "author": "JCThePants",
   "license": "MIT",
   "dependencies": {
-    "@mintpond/mint-bitcoin-script": "^1.0.1",
-    "@mintpond/mint-merkle": "^1.0.0",
+    "@mintpond/hasher-beamhash": "^0.1.1",
+    "@mintpond/mint-beam": "^0.9.0",
     "@mintpond/mint-precon": "^1.0.0",
+    "@mintpond/mint-socket": "^1.0.0",
     "@mintpond/mint-utils": "^2.0.0"
   },
-  "homepage": "https://github.com/MintPond/ref-stratum",
+  "homepage": "https://github.com/MintPond/ref-stratum-beam",
   "bugs": {
-    "url": "https://github.com/MintPond/ref-stratum/issues"
+    "url": "https://github.com/MintPond/ref-stratum-beam/issues"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/MintPond/ref-stratum.git"
+    "url": "https://github.com/MintPond/ref-stratum-beam.git"
   },
   "publishConfig": {
     "registry": "https://npm.pkg.github.com/"
